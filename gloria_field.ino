@@ -26,12 +26,24 @@ boolean relayState=true;
 
 const byte CHIP_ENABLE = 12;
 const byte CHIP_SELECT = 4;
+struct GData{
+  
+};
 
-struct Data{
+struct Data: public GData{
   bool relayState;
   float temperature;
   float voltage;
   long secondsTime;
+  float tankHeight;
+};
+
+struct FlowData: public GData{
+  long secondsTime;
+  float flowRate1;
+  float volume1;
+  float flowRate2;
+  float volume2;
 };
 
 // watchdog interrupt
@@ -94,13 +106,12 @@ float getSourceVoltage(void) // Returns actual value of Vcc (x 100)
     }
 
 
-void sendVoltage (Data data)
+void sendVoltage (const Data& data,const FlowData& flowData)
   {
   // Set up nRF24L01 radio on SPI bus plus pins 9 & 10
   
   RF24 radio(CHIP_ENABLE, CHIP_SELECT);
-  Serial.println("Sending 1");
- //ower_all_enable();
+  //ower_all_enable();
   digitalWrite (SS, HIGH);
   SPI.begin ();
   digitalWrite (CHIP_ENABLE, LOW); 
@@ -115,7 +126,8 @@ void sendVoltage (Data data)
   radio.setRetries(15, 15);
 
   // optionally, reduce the payload size.  seems to improve reliability
-  radio.setPayloadSize(8);
+ // radio.setPayloadSize(32);
+  radio.enableDynamicPayloads();
 //Serial.println("Sending 33");
   radio.openWritingPipe (pipes[0]);
   radio.setPALevel(RF24_PA_MIN);
@@ -129,9 +141,23 @@ void sendVoltage (Data data)
 //  Serial.println("Sending 4");
   
   delay (10);
-  
+  Serial.print("Sending:");
+// Serial.print(data.secondsTime);
+//  
+//  Serial.print(" "  );
+//  Serial.print(GeneralFunctions::getElapsedTimeHoursMinutesSecondsString(data.secondsTime));
+//  Serial.print(" "  );
+//  
+//  Serial.print(data.voltage);
+//  Serial.print(" V,  " );
+//  
+//  Serial.print(data.temperature);
+//   Serial.print(" C, relay=" );
+//     Serial.print(data.relayState);
+   
   bool ok = radio.write (&data, sizeof data);
-  
+
+    ok = radio.write (&flowData, sizeof flowData);
   radio.startListening ();
   radio.powerDown ();
   
@@ -236,7 +262,18 @@ void loop() {
    data.voltage=battVolts;
    data.relayState=relayState;
    data.secondsTime=currentTime;
-   
+   data. tankHeight=5.0;
+
+   FlowData flowData;
+   flowData.secondsTime=currentTime;
+    flowData.flowRate1=1;
+    flowData.volume1=11;
+    
+    flowData.flowRate2=2.2;
+
+    flowData.volume2=22.2;
+    
+    
    Serial.print("    relayState=");
     Serial.print(relayState);
 		Serial.print(" temp=");
@@ -251,22 +288,20 @@ void loop() {
      
     pixels.show();   // Send the updated pixel colors to the hardware .
     delay(DELAYVAL); // Pause before next pass through loo 
-    relayState=!relayState;   
+   
 Serial.print("counter=");
 Serial.println(counter);
 
 
 // every 64 seconds send a reading    
-  if ((++counter & 3 ) == 0)
-    {
+  if ((++counter & 2 ) == 0){
       Serial.println("sending");
       pixels.setPixelColor(0, pixels.Color(0 ,255, 255));
      
     pixels.show();
     
     
-    sendVoltage (data);
-
+   sendVoltage (data,flowData);
     
      if(relayState)pixels.setPixelColor(0, pixels.Color(255, 0, 0));
     else pixels.setPixelColor(0, pixels.Color(0 ,255, 0));
@@ -274,6 +309,9 @@ Serial.println(counter);
     pixels.show();
      Serial.println("sent");
     } // end of 64 seconds being up
+
+
+     relayState=!relayState;   
 //
 //    // clear various "reset" flags
 //  MCUSR = 0;     
