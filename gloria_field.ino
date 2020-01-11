@@ -1,8 +1,16 @@
-#include <Adafruit_NeoPixel.h>
-#include "GravityRtc.h"
+ #include <Adafruit_NeoPixel.h>
+#include <GravityTimeManager.h>
 #include "Wire.h"
+#include <avr/sleep.h>
+#include <avr/wdt.h>
+#include <avr/power.h>
+#include "RF24.h"
+#include <SPI.h>
+#include "nRF24L01.h"
 
-GravityRtc rtc;     //RTC Initialization
+GeneralFunctions generalFunctions;
+GravityTimeManager  timeManager( Serial); 
+
 
 #define RELAY_PIN 15
 #define TMP36_PIN A0
@@ -15,13 +23,16 @@ long millisecondsToBlink=10000;
 
 boolean relayState=true;
 
-#include <avr/sleep.h>
-#include <avr/wdt.h>
-#include <avr/power.h>
-
 
 const byte CHIP_ENABLE = 12;
 const byte CHIP_SELECT = 4;
+
+struct Data{
+  bool relayState;
+  float temperature;
+  float voltage;
+  long secondsTime;
+};
 
 // watchdog interrupt
 ISR (WDT_vect) 
@@ -29,11 +40,9 @@ ISR (WDT_vect)
   wdt_disable();  // disable watchdog
   }  // end of WDT_vect
 
-#include <SPI.h>
-#include "nRF24L01.h"
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 const float InternalReferenceVoltage = 1.086; // as measured
-#include "RF24.h"
+
 
 // Radio pipe addresses for the 2 nodes to communicate.
 const uint64_t pipes[2] = { 0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL };
@@ -85,18 +94,18 @@ float getSourceVoltage(void) // Returns actual value of Vcc (x 100)
     }
 
 
-void sendVoltage (float reading)
+void sendVoltage (Data data)
   {
   // Set up nRF24L01 radio on SPI bus plus pins 9 & 10
   
   RF24 radio(CHIP_ENABLE, CHIP_SELECT);
-  
-  power_all_enable();
+  Serial.println("Sending 1");
+ //ower_all_enable();
   digitalWrite (SS, HIGH);
   SPI.begin ();
   digitalWrite (CHIP_ENABLE, LOW); 
   digitalWrite (CHIP_SELECT, HIGH);
-  
+//  Serial.println("Sending 2");
   //
   // Setup and configure rf radio
   //
@@ -107,32 +116,35 @@ void sendVoltage (float reading)
 
   // optionally, reduce the payload size.  seems to improve reliability
   radio.setPayloadSize(8);
-
+//Serial.println("Sending 33");
   radio.openWritingPipe (pipes[0]);
+  radio.setPALevel(RF24_PA_MIN);
   radio.openReadingPipe (1, pipes[1]);
 
   radio.startListening ();
+//  radio.printDetails();
   delay (10);
   radio.stopListening ();
 
-  
+//  Serial.println("Sending 4");
   
   delay (10);
   
-  bool ok = radio.write (&reading, sizeof reading);
+  bool ok = radio.write (&data, sizeof data);
   
   radio.startListening ();
   radio.powerDown ();
   
   SPI.end ();
+//   Serial.println("Sending completed");
   // set pins to OUTPUT and LOW  
-  for (byte i = 9; i <= 13; i++)
-    {
-    pinMode (i, OUTPUT);    
-    digitalWrite (i, LOW); 
-    }  // end of for loop
-  ADCSRA = 0;  // disable ADC
-  power_all_disable();
+//  for (byte i = 9; i <= 13; i++)
+//    {
+//    pinMode (i, OUTPUT);    
+//    digitalWrite (i, LOW); 
+//    }  // end of for loop
+//  ADCSRA = 0;  // disable ADC
+//  power_all_disable();
   
   }
 float getTemeprature(){
@@ -141,6 +153,12 @@ float getTemeprature(){
  	voltage /= 1024.0;  
 	float temperatureC = (voltage - 0.5) * 100 ;  //converting from 10 mv per degree wit 500 mV offset
 	return temperatureC;
+}
+
+FILE serial_stdout;
+int serial_putchar(char c, FILE* f) {
+   if (c == '\n') serial_putchar('\r', f);
+   return Serial.write(c) == 1? 0 : 1;
 }
 
 void setup() {
@@ -163,7 +181,8 @@ void setup() {
   Serial.begin(9600);
   pinMode(TMP36_PIN, INPUT);
   pinMode(RELAY_PIN, OUTPUT);
-  rtc.setup();
+ // rtc.setup();
+  timeManager.start();
 
 //Set the RTC time automatically: Calibrate RTC time by your computer time
   //rtc.adjustRtc(F(__DATE__), F(__TIME__));
@@ -176,6 +195,12 @@ void setup() {
   pixels.show();   // Send the updated pixel colors to the hardware.
   delay(DELAYVAL); // Pause before next pass through loop
  lastTime=millis();
+
+  fdev_setup_stream(&serial_stdout, serial_putchar, NULL, _FDEV_SETUP_WRITE);
+   stdout = &serial_stdout;
+
+   printf("This now goes to stdout: %d\n", 3);
+
  
   
  }
@@ -187,27 +212,36 @@ void loop() {
 	if(millis()-lastTime>millisecondsToBlink){
 		if(relayState)digitalWrite(RELAY_PIN,HIGH);
     else digitalWrite(RELAY_PIN,LOW);
-   rtc.read();
-  Serial.print(rtc.year);
-  Serial.print("/");//month
-  Serial.print(rtc.month);
-  Serial.print("/");//day
-  Serial.print(rtc.day);
-  Serial.print(" ");//week
- // Serial.print(rtc.week);
-  Serial.print(" ");//hour
-  Serial.print(rtc.hour);
-  Serial.print(":");//minute
-  Serial.print(rtc.minute);
-  Serial.print(":");//second
-  Serial.print(rtc.second);
-		
+   
+//   rtc.read();
+//  Serial.print(rtc.year);
+//  Serial.print("/");//month
+//  Serial.print(rtc.month);
+//  Serial.print("/");//day
+//  Serial.print(rtc.day);
+//  Serial.print(" ");//week
+// // Serial.print(rtc.week);
+//  Serial.print(" ");//hour
+//  Serial.print(rtc.hour);
+//  Serial.print(":");//minute
+//  Serial.print(rtc.minute);
+//  Serial.print(":");//second
+//  Serial.print(rtc.second);
+//		
 		float temperature = getTemeprature();
+   float battVolts=getSourceVoltage();
+    long currentTime = timeManager.getCurrentTimeInSeconds();
+   Data data;
+   data.temperature=temperature;
+   data.voltage=battVolts;
+   data.relayState=relayState;
+   data.secondsTime=currentTime;
+   
    Serial.print("    relayState=");
     Serial.print(relayState);
 		Serial.print(" temp=");
     Serial.print(temperature);
-		float battVolts=getSourceVoltage();
+		
 		Serial.print("  bandgap=");
 		Serial.println(battVolts);
 		loopOverPrimaries();
@@ -218,24 +252,28 @@ void loop() {
     pixels.show();   // Send the updated pixel colors to the hardware .
     delay(DELAYVAL); // Pause before next pass through loo 
     relayState=!relayState;   
+Serial.print("counter=");
+Serial.println(counter);
 
 
 // every 64 seconds send a reading    
-//  if ((++counter & 7 ) == 0)
-//    {
-//      pixels.setPixelColor(0, pixels.Color(0 ,255, 255));
-//     
-//    pixels.show();
-//    
-//    
-//    sendVoltage (battVolts);
-//
-//    
-//     if(relayState)pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-//    else pixels.setPixelColor(0, pixels.Color(0 ,255, 0));
-//     
-//    pixels.show();
-//    } // end of 64 seconds being up
+  if ((++counter & 3 ) == 0)
+    {
+      Serial.println("sending");
+      pixels.setPixelColor(0, pixels.Color(0 ,255, 255));
+     
+    pixels.show();
+    
+    
+    sendVoltage (data);
+
+    
+     if(relayState)pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+    else pixels.setPixelColor(0, pixels.Color(0 ,255, 0));
+     
+    pixels.show();
+     Serial.println("sent");
+    } // end of 64 seconds being up
 //
 //    // clear various "reset" flags
 //  MCUSR = 0;     
